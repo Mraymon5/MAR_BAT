@@ -1,0 +1,6 @@
+Animal	Date	Condition	Notes
+AS7	2019/11/21	None	Hab4
+AS8	2019/11/21	None	Hab4
+AS9	2019/11/22	None	Hab5
+AS7	2019/11/23	Saline	Test1
+AS8	2019/11/24	Saline	Test1
