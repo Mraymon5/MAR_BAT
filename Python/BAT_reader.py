@@ -107,6 +107,11 @@ def MedMS8_reader_stone(file_name,file_check):
                 Detail_Dict['LatencyMatrix'] = boolean_indexing([row.split(',')\
 												  for row in lines[Trial_data_stop+1:]])
     
+	#Add column if 'Retries' Column does not exist
+    if 'Retries' not in df:   
+        df.insert(df.columns.get_loc("Latency")+1,'Retries', '      0')
+		
+		
     #Check if user has data sheet of study details to add to dataframe
     if len(file_check) != 0:
 
@@ -181,7 +186,7 @@ def LickMicroStructure_stone(dFrame_lick,latency_array,bout_crit):
                 bout_dur = np.diff(bout_pos) 
             
             #Append the time diff between bouts to list (each number symbolizes a lick)
-            bouts.append(bout_dur)                
+            bouts.append(np.array(bout_dur))                
 
             #Grab all ILIs within bouts and store
             trial_ILIs = []
@@ -264,6 +269,9 @@ df = merged_df
 #Untack all the ILIs across all bouts to performa math
 df_lists = df[['Bouts']].unstack().apply(pd.Series)
 df['bout_count'] = np.array(df_lists.count(axis='columns'))
+
+#replace all 0s with NaNs (arise due to licking once in the beginning with long pause)
+df_lists.replace(0,np.nan,inplace = True)
 df['Bouts_mean']=np.array(df_lists.mean(axis = 1, skipna = True))
 
 #Work on ILI means
@@ -283,16 +291,4 @@ df['ILI_all'] = all_trials
 
 #Save dataframe for later use/plotting/analyses
 #timestamped with date
-df.to_csv(dir_name+'/%s_grouped_dframe.csv' %(date.today().strftime("%d_%m_%Y")),index=False)	
-
-
-
-
-
-
-
-
-
-
-
-
+df.to_pickle(dir_name+'/%s_grouped_dframe.df' %(date.today().strftime("%d_%m_%Y")))	

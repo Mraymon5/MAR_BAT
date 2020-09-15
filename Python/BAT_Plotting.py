@@ -17,6 +17,11 @@ import numpy as np # module for low-level scientific computing
 import easygui
 import pandas as pd
 
+#Import statistics packages
+import pingouin as pg
+from pingouin import pairwise_ttests
+import statsmodels.api as sm
+
 #Import plotting utilities
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -32,6 +37,22 @@ def boolean_indexing(v, fillval=np.nan):
     out = np.full(mask.shape,fillval)
     out[mask] = np.concatenate(v)
     return out
+# =============================================================================
+# #Define a function for sig bar plotting
+# =============================================================================
+
+#Custom function to draw the sig bars
+def label_pval(i,j,text,X,Y,f_size,color,bar):
+    
+    #Set the height off of the highest bar
+    y =(2)+max(Y)
+    
+    #Set the text to be in the middle of comparative bars and higher than the bar
+    ax.text((X[i]+X[j])*.5, y+3, text, ha='center', va='bottom',size =f_size, color = color)
+    
+	#Set the bar
+    if bar == 'yes':
+        ax.plot([X[i],X[j]], [y+2, y+2], lw=1.5, color = color)
 
 # =============================================================================
 # #Read in file
@@ -42,26 +63,783 @@ os.chdir(dir_name)
 
 #Look for the ms8 files in the directory
 file_list = os.listdir('./')
-file_name = ''
+file_names = []
 for files in file_list:
     if files[-3:] == 'csv':
-        file_name = files
+        file_names.append(files)
+
+df_files = easygui.multchoicebox(
+        msg = 'Which file do you want to work from?', 
+        choices = ([x for x in file_names])) 
 
 #Read in dataframe from CSV
-df = pd.read_csv(file_name)
+df = pd.read_csv(df_files[0])
+
+#Capitalize labels
+df['Notes'] = df['Notes'].str.capitalize()
+
+#Alphabetize the solutions 
+sorted_solutions = list(np.sort(np.array(df['SOLUTION'].unique())))
+
+# =============================================================================
+# #HABITUATION FIGURES for EACH ANIMAL
+# =============================================================================
+# =============================================================================
+# #HABITUATION BAR GRAPHS
+# trimmed_result = df.loc[df.Notes.isin(['Hab4','Hab5'])]
+# 
+# #Check for bottle bias across habituation days
+# g = sns.FacetGrid(trimmed_result, col="Animal",\
+# 				  col_order=sorted(trimmed_result.Animal.unique()),\
+# 				  height=4, aspect=.5,legend_out=True)
+# g = g.map(sns.barplot, "Notes", "LICKS",'TUBE',\
+# 		  order =['Hab4','Hab5'],\
+# 		  palette=sns.color_palette("PuBu_r", len(trimmed_result.Notes.unique())+1))
+# g.axes[0][0].legend()
+# leg = g.axes.flat[0].get_legend()
+# leg.set_title('Bottle Number')
+# =============================================================================
+
+#Create figure
+fig,axes = plt.subplots(nrows=math.ceil(len(df.Animal.unique())/4),\
+			ncols=4,sharex=True, sharey=True,figsize=(12, 8), squeeze=False)
+fig.text(0.5, 0.05, 'Habituation Day', ha='center',fontsize=15,fontweight = 'bold')
+fig.text(0.075, 0.5,'Licks', va='center', 
+		       rotation='vertical',fontsize=15,fontweight = 'bold')
+axes_list = [item for sublist in axes for item in sublist]
+
+#Start animal counter and statistics list
+an_count = 0; rm_stats = []
+
+for ax,animal in zip(axes.flatten(),\
+	 sorted(df.Animal.unique())):
+	 
+	#Query animal data
+	trimmed_result = df.loc[df.Notes.isin(['Hab4','Hab5'])\
+					 & (df['Animal'] == animal)]
+	
+	#Run ANOVA across bottles
+	bottle_stats = []
+	for day in sorted(trimmed_result.Notes.unique()):
+		stat_query = trimmed_result.loc[(trimmed_result['Notes'] == day)]
+		b_stats = stat_query.anova(dv='LICKS', between=['TUBE'])
+		bottle_stats.append(np.round(b_stats.iloc[0,4],2))
+	
+	#Run Repeated Measures ANOVA across days
+	stats = pg.rm_anova(dv='LICKS',
+                  within=['Notes'],
+                  subject='TUBE', data=trimmed_result,  detailed=True)
+
+	pval = np.format_float_scientific(stats.iloc[0,5],1, exp_digits=2)
+	rm_stats.append(pval)
+		
+	#Establish plot location
+	ax = axes_list.pop(0)
+
+	#Plot
+	sns.barplot(x='Notes',\
+				y='LICKS',\
+				hue='TUBE',\
+				data=trimmed_result,
+				order =['Hab4','Hab5'],
+				palette=sns.color_palette("PuBu_r", len(trimmed_result.Notes.unique())+1),\
+				ax=ax)
+	
+	#Formatting
+	ax.set_ylim(0,105)
+	ax.set_xlabel('')
+	ax.set_ylabel('')
+	ax.set_title('%s' %(animal),fontweight = 'bold')
+	
+	if an_count != 0:
+		ax.get_legend().set_visible(False)
+	
+	an_count +=1
+	
+	#Establish plotting points for sig bars
+	x_pos = np.arange(-0.25,len(stat_query.TUBE.unique()),0.5)
+	
+	#Flip through groups and call function
+	counter = 0
+	for stat_group in range(len(bottle_stats)):
+	    
+	    #create the label
+	    color = 'black'
+	    if bottle_stats[stat_group] > 0.05:
+	        label = 'p = %s' %(bottle_stats[stat_group])
+	    if bottle_stats[stat_group] <= 0.05:
+	        label = 'p < 0.05'
+	        color = 'red'
+	    if bottle_stats[stat_group] <= 0.01:
+	        label = 'p < 0.01'
+	        color = 'red'
+	    if bottle_stats[stat_group] <= 0.001:
+	        label = 'p < 0.001'
+	        color = 'red'
+	    
+	    #Add label to figure
+	    label_pval(counter,\
+	               counter+1,\
+	               label,x_pos,list([78,0]),10,color,'yes')
+	    
+	    counter+=2
+		
+	#Draw repeated_measures bar and stat create the label
+	color = 'black'
+	if stats.iloc[0,5] > 0.05:
+		label = 'p = %s' %(pval)
+	if stats.iloc[0,5] <= 0.05:
+		label = 'p < 0.05'
+		color = 'red'
+	if stats.iloc[0,5] <= 0.01:
+		label = 'p < 0.01'
+		color = 'red'
+	if stats.iloc[0,5] <= 0.001:
+		label = 'p < 0.001'
+		color = 'red'
+	
+	#Add label to figure
+	label_pval(0,1,label,np.arange(0,2),\
+			list([90,0]),10,color,'yes')
+
+#Update the legend	
+axes[0,0].legend(title='Bottle #',loc=6)	
+plt.suptitle('Bottle-Bias Assessment \nHabituation',size=18,fontweight = 'bold')
+
+# =============================================================================
+# #TEST FIGURES for EACH ANIMAL
+# =============================================================================
+#Create figure
+fig,axes = plt.subplots(nrows=math.ceil(len(df.Animal.unique())/3),\
+			ncols=3,sharex=True, sharey=True,figsize=(12,12), squeeze=False)
+fig.text(0.5, 0.05, 'Tastant', ha='center',fontsize=15,fontweight = 'bold')
+fig.text(0.075, 0.5,'Licks', va='center', 
+		       rotation='vertical',fontsize=15,fontweight = 'bold')
+axes_list = [item for sublist in axes for item in sublist]
+
+#Start animal counter and statistics list
+an_count = 0; rm_stats = []
+
+for ax,animal in zip(axes.flatten(),\
+	 sorted(df.Animal.unique())):
+	 
+	#Query animal data
+	trimmed_result = df.loc[df.Notes.isin(['Test2','Test3'])\
+					 & (df['Animal'] == animal)]
+	
+	
+	#Establish plot location
+	ax = axes_list.pop(0)
+	
+	#Run paired T-Test across solutions
+	solution_stats_str = []; solution_stats_val = []
+	for solution in sorted(trimmed_result.SOLUTION.unique()):
+		stat_query = trimmed_result.loc[(trimmed_result['SOLUTION'] == solution)]
+		
+		stats= pg.pairwise_ttests(dv='LICKS',
+	                  within=['Condition'],
+	                  subject='Animal', data=stat_query,
+					  padjust = 'bonf')
+
+		pval = np.format_float_scientific(stats.iloc[0,8],1, exp_digits=2)
+		solution_stats_val.append(stats.iloc[0,8])
+		solution_stats_str.append(pval)
+
+	#Plot
+	sns.barplot(x='SOLUTION',\
+				y='LICKS',\
+				hue='Condition',\
+				hue_order = ['Saline','Nicotine'],\
+				data=trimmed_result,
+				order =sorted_solutions,
+				palette=sns.color_palette("PuBu_r", len(trimmed_result.Notes.unique())+1),\
+				ax=ax)
+	
+	ax.set_xticklabels(labels=sorted_solutions,rotation=60)
+	
+	#Formatting
+	ax.set_ylim(0,150)
+	ax.set_xlabel('')
+	ax.set_ylabel('')
+	ax.set_title('%s' %(animal),fontweight = 'bold')
+	
+	if an_count != 0:
+		ax.get_legend().set_visible(False)
+	
+	an_count +=1
+	
+	#Establish plotting points for sig bars
+	x_pos = np.arange(-0.25,len(trimmed_result.SOLUTION.unique()),0.5)
+	
+	#Flip through groups and call function
+	counter = 0
+	for stat_group in range(len(solution_stats_val)):
+	    
+	    #create the label
+	    color = 'black'
+	    if solution_stats_val[stat_group] > 0.05:
+	        label = '' 
+	    if solution_stats_val[stat_group] <= 0.05:
+	        label = '*'
+	        color = 'red'
+	    if solution_stats_val[stat_group] <= 0.01:
+	        label = '**'
+	        color = 'red'
+	    if solution_stats_val[stat_group] <= 0.001:
+	        label = '***'
+	        color = 'red'
+	    
+	    #Add label to figure
+	    label_pval(counter,\
+	               counter+1,\
+	               label,x_pos,list([110,0]),15,color,'no')
+	    
+	    counter+=2
+
+#Add title
+plt.suptitle('Nicotine Impact on Licks',size=18,fontweight = 'bold')
+	
+
+# =============================================================================
+# #TEST DAY for EACH ANIMAL
+# =============================================================================
+#Create figure
+fig,axes = plt.subplots(nrows=math.ceil(len(df.Animal.unique())/3),\
+			ncols=3,sharex=True, sharey=True,figsize=(12,12), squeeze=False)
+fig.text(0.5, 0.05, 'Tastant', ha='center',fontsize=15,fontweight = 'bold')
+fig.text(0.075, 0.5,'Licks', va='center', 
+		       rotation='vertical',fontsize=15,fontweight = 'bold')
+axes_list = [item for sublist in axes for item in sublist]
+
+#Start animal counter and statistics list
+an_count = 0; rm_stats = []
+
+for ax,animal in zip(axes.flatten(),\
+	 sorted(df.Animal.unique())):
+	 
+	#Query animal data
+	trimmed_result = df.loc[df.Notes.isin(['Test1','Test2','Test3'])\
+					 & (df['Animal'] == animal)]
+	
+	
+	#Establish plot location
+	ax = axes_list.pop(0)
+
+	#Plot
+	sns.barplot(x='SOLUTION',\
+				y='LICKS',\
+				hue='Notes',\
+				hue_order = ['Test1','Test2','Test3'],\
+				data=trimmed_result,
+				order =sorted_solutions,
+				palette=sns.color_palette("PuBu_r", len(trimmed_result.Notes.unique())+1),\
+				ax=ax)
+	
+	ax.set_xticklabels(labels=sorted_solutions,rotation=60)
+	
+	#Formatting
+	ax.set_ylim(0,150)
+	ax.set_xlabel('')
+	ax.set_ylabel('')
+	ax.set_title('%s' %(animal),fontweight = 'bold')
+	
+		
+	if an_count != 0:
+		ax.get_legend().set_visible(False)
+	
+	an_count +=1
+
+#Add title
+plt.suptitle('Nicotine Impact on Licks \nAll Test Days',\
+			 size=18,fontweight = 'bold')
+		
+# =============================================================================
+# #Run statistics to ensure that group1 does not vary from group2
+# =============================================================================
+#Set parameters to query dataframe by
+trimmed_result = df.loc[(df['Notes'] !='Test1') & \
+							(df['Condition'] !='None') &\
+							(df['LICKS'] !=0)]
+
+group_nums = easygui.multenterbox(
+            msg = 'Input group counts (in case protocol changed during exp)', 
+            fields = ['Groups:'], 
+            values = ['2'])
+
+#Identify which subjects belong to each group and label dataframe accordingly
+group_subs = []
+for group in range(int(group_nums[0])):
+	group_animals = easygui.multchoicebox(
+        msg = 'Which animals belong in group %i?' %(group+1), 
+        choices = ([x for x in sorted(df.Animal.unique())])) 
+	group_subs.append(group_animals)
+
+#Label dataframe with group values
+df.insert(loc=3, column='Group', value='')
+
+for group in range(len(group_subs)):
+	df.Group.loc[(df.Animal.isin(group_subs[group]))]= 'Group%i' %(group)
+
+#Add hedonic labels
+pal_nums = easygui.multenterbox(
+            msg = 'Input how many groups of palatability you want to parse data into..', 
+            fields = ['Groups:'], 
+            values = ['3'])
+
+#Identify which tastans belong to each palatablity group and label dataframe accordingly
+pal_subs = []
+for group in range(int(pal_nums[0])):
+	group_animals = easygui.multchoicebox(
+        msg = 'Which tastants belong in group %i?' %(group+1), 
+        choices = ([x for x in sorted(df.SOLUTION.unique())])) 
+	pal_subs.append(group_animals)
+
+#Label dataframe with group values
+df.insert(loc=4, column='Pal_Group', value='')
+
+for group in range(len(pal_subs)):
+	df.Pal_Group.loc[(df.SOLUTION.isin(pal_subs[group]))]= pal_subs[group][0][:1]
+
+#Specify days/conditions to run stats on
+group_stat_count = df.loc[~df.Notes.isin(['Hab4','Hab5'])].groupby(['Notes','Condition',\
+							   'Group']).count()/df.PRESENTATION.unique()[-1]
+group_stat_count =  group_stat_count.Animal.reset_index(level=['Condition', 'Notes'])
+group_stat_count.rename(columns={'Animal': 'Animal_count'})
+
+#Test day 1
+trimmed_result = df.loc[(df['Notes'] =='Test1') & (df['LICKS'] !=0)]
+test1_stats = trimmed_result.anova(dv='LICKS', between=['SOLUTION', 'Group'])
+pval = np.round(test1_stats.iloc[2,5],2)
+
+#Plot
+plt.figure(figsize=(12,8))
+g = sns.pointplot(data=trimmed_result, x='SOLUTION', y='LICKS',\
+			  hue='Group', hue_order = ['Group0','Group1'],\
+			  dodge=True, markers=['o', 's'],order=sorted_solutions,
+			  capsize=.1, errwidth=1, palette='dark')
+
+#Formatting
+sns.set_style("whitegrid", {'axes.grid' : False})
+
+for ax in plt.gcf().axes:
+    xlab = ax.get_xlabel()
+    ylab = ax.get_ylabel()
+    xticks = ax.get_xticklabels()
+    yticks = ax.get_yticklabels()
+    ax.set_xlabel(xlab.title(), fontsize=20, fontweight='bold')
+    ax.set_xticklabels(xticks,fontsize=14)
+    ax.set_ylabel('Licks', fontsize=20, fontweight='bold')
+    ax.legend(fontsize=16,ncol=2,loc = 'upper right')
+    ax.set_title('Fan impact on on Lick Count\n Test Day: One',\
+				 fontsize=20, fontweight='bold')
+    
+	#Set the text be in upper left corner
+    ax.text(0.10, 0.9, '$p = %s$' %(pval), ha='center',\
+		 va='center', transform=ax.transAxes,\
+		 fontsize=16, fontweight='bold')
+
+#Test day 2
+trimmed_result = df.loc[(df['Notes'] =='Test2')\
+				& (df['Condition'] =='Saline') & (df['LICKS'] !=0)]
+test2_stats = trimmed_result.anova(dv='LICKS', between=['SOLUTION', 'Group'])
+pval = np.round(test2_stats.iloc[2,5],2)
+
+#Plot
+plt.figure(figsize=(12,8))
+g = sns.pointplot(data=trimmed_result, x='SOLUTION', y='LICKS',\
+			  hue='Group', hue_order = ['Group0','Group1'],\
+			  dodge=True, markers=['o', 's'],order=sorted_solutions,
+			  capsize=.1, errwidth=1, palette='dark')
+
+#Formatting
+sns.set_style("whitegrid", {'axes.grid' : False})
+
+for ax in plt.gcf().axes:
+    xlab = ax.get_xlabel()
+    ylab = ax.get_ylabel()
+    xticks = ax.get_xticklabels()
+    yticks = ax.get_yticklabels()
+    ax.set_xlabel(xlab.title(), fontsize=20, fontweight='bold')
+    ax.set_xticklabels(xticks,fontsize=14)
+    ax.set_ylabel('Licks', fontsize=20, fontweight='bold')
+    ax.legend(fontsize=16,ncol=2,loc = 'upper right')
+    ax.set_title('Fan impact on on Lick Count\n Test Day: Two',\
+				 fontsize=20, fontweight='bold')
+    
+	#Set the text be in upper left corner
+    ax.text(0.10, 0.9, '$p = %s$' %(pval), ha='center',\
+		 va='center', transform=ax.transAxes,\
+		 fontsize=16, fontweight='bold')
+
+#Test day 3
+trimmed_result = df.loc[(df['Notes'] =='Test3')\
+				& (df['Condition'] =='Nicotine') & (df['LICKS'] !=0)]
+test3_stats = trimmed_result.anova(dv='LICKS', between=['SOLUTION', 'Group'])
+pval = np.round(test3_stats.iloc[2,5],2)
+
+#Plot
+plt.figure(figsize=(12,8))
+g = sns.pointplot(data=trimmed_result, x='SOLUTION', y='LICKS',\
+			  hue='Group', hue_order = ['Group0','Group1'],\
+			  dodge=True, markers=['o', 's'],order=sorted_solutions,
+			  capsize=.1, errwidth=1, palette='dark')
+
+#Formatting
+sns.set_style("whitegrid", {'axes.grid' : False})
+
+for ax in plt.gcf().axes:
+    xlab = ax.get_xlabel()
+    ylab = ax.get_ylabel()
+    xticks = ax.get_xticklabels()
+    yticks = ax.get_yticklabels()
+    ax.set_xlabel(xlab.title(), fontsize=20, fontweight='bold')
+    ax.set_xticklabels(xticks,fontsize=14)
+    ax.set_ylabel('Licks', fontsize=20, fontweight='bold')
+    ax.legend(fontsize=16,ncol=2,loc = 'upper right')
+    ax.set_title('Fan impact on on Lick Count\n Test Day: Three',\
+				 fontsize=20, fontweight='bold')
+    
+	#Set the text be in upper left corner
+    ax.text(0.10, 0.9, '$p = %s$' %(pval), ha='center',\
+		 va='center', transform=ax.transAxes,\
+		 fontsize=16, fontweight='bold')
+
+#PLOT BY GROUP
+#Set parameters to query dataframe by
+trimmed_result = df.loc[(df['Notes'] !='Test1') & \
+							(df['Condition'] !='None') &\
+							(df['LICKS'] !=0)\
+							& (df['Group'] =='Group0')]
+
+#REPEATED MEASURES FOR GROUP0
+stats = pg.rm_anova(dv='LICKS',
+                  within=['SOLUTION', 'Condition'],
+                  subject='Animal', data=trimmed_result,  detailed=True)
+
+pval0 = np.format_float_scientific(stats.iloc[0,7],1, exp_digits=2)
+pval1 = np.format_float_scientific(stats.iloc[1,7],1, exp_digits=2)
+pval2 = np.round(stats.iloc[2,7],2)
+
+plt.figure(figsize=(12,8))
+g = sns.pointplot(data=trimmed_result, x='SOLUTION', y='LICKS',\
+			  hue='Condition',\
+			  hue_order = sorted(trimmed_result.Condition.unique()),\
+			  dodge=True, markers=['o', 's'],order=sorted_solutions,
+			  capsize=.1, errwidth=1, palette='dark')
+
+#Formatting
+sns.set_style("whitegrid", {'axes.grid' : False})
+
+for ax in plt.gcf().axes:
+    xlab = ax.get_xlabel()
+    ylab = ax.get_ylabel()
+    xticks = ax.get_xticklabels()
+    yticks = ax.get_yticklabels()
+    ax.set_xlabel(xlab.title(), fontsize=20, fontweight='bold')
+    ax.set_xticklabels(xticks,fontsize=14)
+    ax.set_ylabel('Licks', fontsize=20, fontweight='bold')
+    ax.legend(fontsize=16,ncol=2,loc = 'upper right')
+    ax.set_title('Lick Count\n Group 0',\
+				 fontsize=20, fontweight='bold')
+    
+	#Set the text be in upper left corner
+    ax.text(0.15, 0.9, 'Solution; $p = %s$\n Cond; $p = %s$\n Cond*Solution; $p = %s$' \
+			%(pval0,pval1,pval2), ha='center', va='center',\
+			transform=ax.transAxes, fontsize=16, fontweight='bold')
+
+
+#Group1
+#Set parameters to query dataframe by
+trimmed_result = df.loc[(df['Notes'] !='Test1') & \
+							(df['Condition'] !='None') &\
+							(df['LICKS'] !=0)\
+							& (df['Group'] =='Group1')]
+
+
+#REPEATED MEASURES FOR GROUP1
+stats = pg.rm_anova(dv='LICKS',
+                  within=['SOLUTION', 'Condition'],
+                  subject='Animal', data=trimmed_result,  detailed=True)
+
+pval0 = np.format_float_scientific(stats.iloc[0,7],1, exp_digits=2)
+pval1 = np.format_float_scientific(stats.iloc[1,7],1, exp_digits=2)
+pval2 = np.round(stats.iloc[2,7],2)
+
+plt.figure(figsize=(12,8))
+g = sns.pointplot(data=trimmed_result, x='SOLUTION', y='LICKS',\
+			  hue='Condition',\
+			  hue_order = sorted(trimmed_result.Condition.unique()),\
+			  dodge=True, markers=['o', 's'],order=sorted_solutions,
+			  capsize=.1, errwidth=1, palette='dark')
+
+#Formatting
+sns.set_style("whitegrid", {'axes.grid' : False})
+
+for ax in plt.gcf().axes:
+    xlab = ax.get_xlabel()
+    ylab = ax.get_ylabel()
+    xticks = ax.get_xticklabels()
+    yticks = ax.get_yticklabels()
+    ax.set_xlabel(xlab.title(), fontsize=20, fontweight='bold')
+    ax.set_xticklabels(xticks,fontsize=14)
+    ax.set_ylabel('Licks', fontsize=20, fontweight='bold')
+    ax.legend(fontsize=16,ncol=2,loc = 'upper right')
+    ax.set_title('Lick Count\n Group 1',\
+				 fontsize=20, fontweight='bold')
+    
+	#Set the text be in upper left corner
+    ax.text(0.15, 0.9, 'Solution; $p = %s$\n Cond; $p = %s$\n Cond*Solution; $p = %s$' \
+			%(pval0,pval1,pval2), ha='center', va='center',\
+			transform=ax.transAxes, fontsize=16, fontweight='bold')
+
+#Try Violin Plot
+plt.figure(figsize=(12,8))
+ax = sns.violinplot(x="SOLUTION", y="LICKS", hue="Condition",\
+			  hue_order = sorted(trimmed_result.Condition.unique()),\
+			  data=trimmed_result, palette="muted", split=True,\
+			  order= sorted(trimmed_result.SOLUTION.unique()),\
+			  scale_hue=True, inner='quartile')
+
+plt.figure(figsize=(12,8))
+ax = sns.violinplot(x="SOLUTION", y="Latency", hue="Condition",\
+			  hue_order = sorted(trimmed_result.Condition.unique()),\
+			  data=trimmed_result, palette="muted", split=True,\
+			  order= sorted(trimmed_result.SOLUTION.unique()),\
+			  scale_hue=True, inner='quartile')
+
+plt.figure(figsize=(12,8))
+ax = sns.violinplot(x="SOLUTION", y="Lat_First", hue="Condition",\
+			  hue_order = sorted(trimmed_result.Condition.unique()),\
+			  data=trimmed_result, palette="muted", split=True,\
+			  order= sorted(trimmed_result.SOLUTION.unique()),\
+			  scale_hue=True, inner='quartile')
+
+plt.figure(figsize=(12,8))
+ax = sns.scatterplot(x="bout_count", y="Bouts_mean", hue="Condition",\
+			  hue_order = sorted(trimmed_result.Condition.unique()),\
+			  data=trimmed_result, palette="muted", split=True,\
+			  order= sorted(trimmed_result.SOLUTION.unique()),\
+			  scale_hue=True, inner='quartile')
+
+
+kws = dict(s=50, linewidth=.5, edgecolor="w")
+g = sns.FacetGrid(trimmed_result, row="SOLUTION",\
+				  row_order=sorted_solutions, hue="Condition", palette="Set1",\
+				  hue_order=["Saline", "Nicotine"])
+g = (g.map(plt.scatter, "bout_count", "Bouts_mean", **kws).add_legend())
+
+
+
+
+#ALL
+#Set parameters to query dataframe by
+trimmed_result = df.loc[(df['Notes'] !='Test1') & \
+							(df['Condition'] !='None') &\
+							(df['LICKS'] !=0)]
+
+#REPEATED MEASURES FOR All
+stats = pg.rm_anova(dv='LICKS',
+                  within=['SOLUTION', 'Condition'],
+                  subject='Animal', data=trimmed_result,  detailed=True)
+
+pval0 = np.format_float_scientific(stats.iloc[0,7],1, exp_digits=2)
+pval1 = np.format_float_scientific(stats.iloc[1,7],1, exp_digits=2)
+pval2 = np.round(stats.iloc[2,7],2)
+
+plt.figure(figsize=(12,8))
+g = sns.pointplot(data=trimmed_result, x='SOLUTION', y='LICKS',\
+			  hue='Condition',\
+			  hue_order = sorted(trimmed_result.Condition.unique()),\
+			  dodge=True, markers=['o', 's'],order=sorted_solutions,
+			  capsize=.1, errwidth=1, palette='dark')
+
+#Formatting
+sns.set_style("whitegrid", {'axes.grid' : False})
+
+for ax in plt.gcf().axes:
+    xlab = ax.get_xlabel()
+    ylab = ax.get_ylabel()
+    xticks = ax.get_xticklabels()
+    yticks = ax.get_yticklabels()
+    ax.set_xlabel(xlab.title(), fontsize=20, fontweight='bold')
+    ax.set_xticklabels(xticks,fontsize=14)
+    ax.set_ylabel('Licks', fontsize=20, fontweight='bold')
+    ax.legend(fontsize=16,ncol=2,loc = 'upper right')
+    ax.set_title('Lick Count\n All',\
+				 fontsize=20, fontweight='bold')
+    
+	#Set the text be in upper left corner
+    ax.text(0.15, 0.9, 'Solution; $p = %s$\n Cond; $p = %s$\n Cond*Solution; $p = %s$' \
+			%(pval0,pval1,pval2), ha='center', va='center',\
+			transform=ax.transAxes, fontsize=16, fontweight='bold')
+# =============================================================================
+# =============================================================================
+# # #REPEATED MEASURES ANOVA
+# # #BASED ON HEDONICS
+# =============================================================================
+# =============================================================================
+trimmed_result = df.loc[(df['Notes'] !='Test1')\
+						& (df['LICKS'] !=0)\
+						&(df['Condition'] !='None')\
+						& (df['Group'] =='Group0')\
+						& (df['Pal_Group'] !='')]
+
+aov_0 = pg.rm_anova(dv='LICKS',
+                  within=['Pal_Group', 'Condition'],
+                  subject='Animal', data=trimmed_result,  detailed=True)
+
+plt.figure(figsize=(12,8))
+g = sns.pointplot(data=trimmed_result, x='Pal_Group', y='LICKS',\
+			  hue='Condition',\
+			  hue_order = sorted(trimmed_result.Condition.unique()),\
+			  dodge=True, markers=['o', 's'],\
+			  order=sorted(trimmed_result.Pal_Group.unique()),
+			  capsize=.1, errwidth=1, palette='dark')
+
+trimmed_result = df.loc[(df['Notes'] !='Test1')\
+						& (df['LICKS'] !=0)\
+						&(df['Condition'] !='None')\
+						& (df['Group'] =='Group1')\
+						& (df['Pal_Group'] !='')]
+
+aov_1 = pg.rm_anova(dv='LICKS',
+                  within=['Pal_Group', 'Condition'],
+                  subject='Animal', data=trimmed_result,  detailed=True)
+
+plt.figure(figsize=(12,8))
+g = sns.pointplot(data=trimmed_result, x='Pal_Group', y='LICKS',\
+			  hue='Condition',\
+			  hue_order = sorted(trimmed_result.Condition.unique()),\
+			  dodge=True, markers=['o', 's'],\
+			  order=sorted(trimmed_result.Pal_Group.unique()),
+			  capsize=.1, errwidth=1, palette='dark')
+
+trimmed_result = df.loc[(df['Notes'] !='Test1')\
+						& (df['LICKS'] !=0)\
+						&(df['Condition'] !='None')\
+						& (df['Pal_Group'] !='')]
+
+aov_all = pg.rm_anova(dv='LICKS',
+                  within=['Pal_Group', 'Condition'],
+                  subject='Animal', data=trimmed_result,  detailed=True)
+
+plt.figure(figsize=(12,8))
+g = sns.pointplot(data=trimmed_result, x='Pal_Group', y='LICKS',\
+			  hue='Condition',\
+			  hue_order = sorted(trimmed_result.Condition.unique()),\
+			  dodge=True, markers=['o', 's'],\
+			  order=sorted(trimmed_result.Pal_Group.unique()),
+			  capsize=.1, errwidth=1, palette='dark')
+
+
+# =============================================================================
+# =============================================================================
+# # #REPEATED MEASURES ANOVA
+# # #ONLY FOR N and Q
+# =============================================================================
+# =============================================================================
+trimmed_result = df.loc[(df['Notes'] !='Test1')\
+						& (df['LICKS'] !=0)\
+						&(df['Condition'] !='None')\
+						& (df['Group'] =='Group0')\
+						& (df.Pal_Group.isin(['N','Q']))]
+
+aov_0 = pg.rm_anova(dv='LICKS',
+                  within=['Pal_Group', 'Condition'],
+                  subject='Animal', data=trimmed_result,  detailed=True)
+
+plt.figure(figsize=(12,8))
+g = sns.pointplot(data=trimmed_result, x='Pal_Group', y='LICKS',\
+			  hue='Condition',\
+			  hue_order = sorted(trimmed_result.Condition.unique()),\
+			  dodge=True, markers=['o', 's'],\
+			  order=sorted(trimmed_result.Pal_Group.unique()),
+			  capsize=.1, errwidth=1, palette='dark')
+
+trimmed_result = df.loc[(df['Notes'] !='Test1')\
+						& (df['LICKS'] !=0)\
+						&(df['Condition'] !='None')\
+						& (df['Group'] =='Group1')\
+						& (df.Pal_Group.isin(['N','Q']))]
+
+aov_1 = pg.rm_anova(dv='LICKS',
+                  within=['Pal_Group', 'Condition'],
+                  subject='Animal', data=trimmed_result,  detailed=True)
+
+plt.figure(figsize=(12,8))
+g = sns.pointplot(data=trimmed_result, x='Pal_Group', y='LICKS',\
+			  hue='Condition',\
+			  hue_order = sorted(trimmed_result.Condition.unique()),\
+			  dodge=True, markers=['o', 's'],\
+			  order=sorted(trimmed_result.Pal_Group.unique()),
+			  capsize=.1, errwidth=1, palette='dark')
+
+trimmed_result = df.loc[(df['Notes'] !='Test1')\
+						& (df['LICKS'] !=0)\
+						&(df['Condition'] !='None')\
+						& (df.Pal_Group.isin(['N','Q']))]
+
+aov_all = pg.rm_anova(dv='LICKS',
+                  within=['Pal_Group', 'Condition'],
+                  subject='Animal', data=trimmed_result,  detailed=True)
+
+plt.figure(figsize=(12,8))
+g = sns.pointplot(data=trimmed_result, x='Pal_Group', y='LICKS',\
+			  hue='Condition',\
+			  hue_order = sorted(trimmed_result.Condition.unique()),\
+			  dodge=True, markers=['o', 's'],\
+			  order=sorted(trimmed_result.Pal_Group.unique()),
+			  capsize=.1, errwidth=1, palette='dark')
+
+
+#Formatting
+sns.set_style("whitegrid", {'axes.grid' : False})
+
+for ax in plt.gcf().axes:
+    xlab = ax.get_xlabel()
+    ylab = ax.get_ylabel()
+    xticks = ax.get_xticklabels()
+    yticks = ax.get_yticklabels()
+    ax.set_xlabel(xlab.title(), fontsize=20, fontweight='bold')
+    ax.set_xticklabels(xticks,fontsize=14)
+    ax.set_ylabel('Licks', fontsize=20, fontweight='bold')
+    ax.legend(fontsize=16,ncol=2,loc = 'upper right')
+    ax.set_title('Lick Count\n All',\
+				 fontsize=20, fontweight='bold')
+    
+	#Set the text be in upper left corner
+    ax.text(0.15, 0.9, 'Solution; $p = %s$\n Cond; $p = %s$\n Cond*Solution; $p = %s$' \
+			%(pval0,pval1,pval2), ha='center', va='center',\
+			transform=ax.transAxes, fontsize=16, fontweight='bold')
+
+
+
+#Compare licks across groups by solution for each test day (3WAY-ANOVA)
+for day in sorted(df.Notes.loc[~df.Notes.isin(['Hab4','Hab5'])].unique()):
+	trimmed_result = df.loc[(df['Notes'] ==day)]
+	trimmed_result.anova(dv='LICKS', between=['Condition', 'SOLUTION', 'Group'],
+		   ss_type=3)
+		
+	
+	
+#Compare licks across groups by solution for each test day (2WAY-ANOVA)
+for day in sorted(df.Notes.loc[~df.Notes.isin(['Hab4','Hab5'])].unique()):
+	for condition in sorted(df.Condition.unique()):
+		trimmed_result = df.loc[(df['Notes'] ==day) & (df['Condition'] ==condition)]
+		trimmed_result.anova(dv='LICKS', between=['SOLUTION', 'Group'],
+			   ss_type=3)
+
 
 # =============================================================================
 # =============================================================================
 # # #PLOT NICITONE IMPACT ON LICKS, GROUPED MEANS
 # =============================================================================
 # =============================================================================
-#Alphabetize the solutions 
-sorted_solutions = list(np.sort(np.array(df['SOLUTION'].unique())))
-
 #Set parameters to query dataframe by
 trimmed_result = df.loc[(df['Notes'] !='test1') & \
 							(df['Condition'] !='None') &\
-							(df['LICKS'] !=0)]
+							(df['LICKS'] !=0)\
+							& (df['Group'] =='Group1')]
 
 #Plot grouped bar graphs
 g = sns.catplot(x='SOLUTION',\
@@ -118,7 +896,7 @@ for ax in plt.gcf().axes:
     yticks = ax.get_yticklabels()
     ax.set_xlabel(xlab.title(), fontsize=15, fontweight='bold')
     ax.set_xticklabels(xticks,fontsize=14)
-    ax.set_ylabel(ylab.title(), fontsize=15, fontweight='bold')
+    ax.set_ylabel('Licks w/in Bout', fontsize=15, fontweight='bold')
     ax.set_yticklabels(yticks,fontsize=14)
     ax.legend(fontsize=16,ncol=2)
     ax.set_title('Nicotine Impact on Lick w/in a Bout',\
@@ -146,7 +924,7 @@ for ax in plt.gcf().axes:
     yticks = ax.get_yticklabels()
     ax.set_xlabel(xlab.title(), fontsize=15, fontweight='bold')
     ax.set_xticklabels(xticks,fontsize=14)
-    ax.set_ylabel(ylab.title(), fontsize=15, fontweight='bold')
+    ax.set_ylabel('Latency to second lick', fontsize=15, fontweight='bold')
     ax.set_yticklabels(yticks,fontsize=14)
     ax.legend(fontsize=16,ncol=2)
     ax.set_title('Nicotine Impact on Latency to 2nd Lick',\
@@ -213,8 +991,6 @@ sns.set_style("whitegrid", {'axes.grid' : False})
 
 # =============================================================================
 # #Plot histograms of ILIs by solution
-# p = trimmed_result['ILI_all'].hist(by=trimmed_result['SOLUTION'], bins=2, figsize=(12,10))    
-# 
 # =============================================================================
 #Set parameters to query dataframe by
 trimmed_result = df.loc[(df['Condition'] !='None') &\
@@ -263,33 +1039,6 @@ plt.suptitle('Nicotine impact on ILIs',weight='bold')
 trimmed_result = df.loc[(df['Condition'] !='None') &\
 							(df['LICKS'] !=0)]
 trimmed_result =trimmed_result.sort_values(by=['Notes'])
-# =============================================================================
-# 
-# #Calculate number of counts an animal could have
-# denominator = len(merged_df.Animal.unique())*len(trimmed_result.Trial_num.unique())
-# 
-# #Plot grouped bar graphs of trials participated in
-# fig, ax = plt.subplots(figsize=(12,8))
-# g = sns.barplot(x='SOLUTION',\
-# 				y='LICKS',\
-# 				hue='Notes',\
-# 				data=trimmed_result,
-# 				estimator=lambda x: len(x) / denominator * 100,\
-# 				order=sorted_solutions,\
-# 				palette=sns.color_palette("PuBu_r", len(trimmed_result.Notes.unique())+1))
-# 
-# #Format
-# sns.set_style("whitegrid", {'axes.grid' : False})
-# g.set_ylabel(ylabel="Percent of Trials",fontsize=18, weight='bold')
-# g.set_xlabel(xlabel='Solution', fontsize=18, weight='bold')
-# xticks = g.get_xticklabels()
-# yticks = g.get_yticklabels()
-# g.set_xticklabels(xticks,fontsize=14)
-# #ax.set_yticklabels(labels=yticks,fontsize=14)
-# g.legend(fontsize=16,ncol=3)
-# g.set_title('Nicotine Impact on Trial Participation',\
-# 				 fontsize=20, weight='bold')
-# =============================================================================
 
 #Get percentage participated by animal (to include errorbars)
 trimmed_result = df.loc[(df['Condition'] !='None')]
@@ -533,10 +1282,7 @@ g = sns.FacetGrid(trimmed_result, col="SOLUTION",\
 g = g.map(sns.barplot, "Condition", "LICKS")
 
 
-#First Latency between first and second lick
-g = sns.FacetGrid(trimmed_result, col="SOLUTION",\
-				  col_order=sorted_solutions, height=4, aspect=.5)
-g = g.map(sns.barplot, "Condition", "Lat_First")
+
 
 
 #Licks by bout number
@@ -556,13 +1302,6 @@ g = sns.FacetGrid(trimmed_result, col="Animal", row="SOLUTION",\
 				  row_order=sorted_solutions, hue="Condition", palette="Set1",\
 				  hue_order=["Saline", "Nicotine"])
 g = (g.map(plt.scatter, "Trial_num", "bout_count", **kws).add_legend())
-
-
-
-
-
-
-
 
 
 
