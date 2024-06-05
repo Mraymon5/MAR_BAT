@@ -60,6 +60,10 @@ def MedMS8_reader_stone(file_name,file_check):
 	#Extract file name and store
     Detail_Dict['FileName'] = file_name[file_name.rfind('/')+1:]
 	
+	#Scan for legacy compatibility issues and overwrite
+    lines = [s.replace("PRES", "PRESENTATION") for s in lines]
+    lines = [s.replace("Latency\n", "Latency") for s in lines]
+	
 	#Store details in dictionary and construct dataframe	
     for i in range(len(lines)):
         if "Start Date" in lines[i]:
