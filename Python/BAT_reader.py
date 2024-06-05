@@ -95,8 +95,8 @@ def MedMS8_reader_stone(file_name,file_check):
 
 				#Convert specific columns to numeric
                 df["SOLUTION"] = df["SOLUTION"].str.strip()
-                df[["PRESENTATION","TUBE","CONCENTRATION","LICKS","Latency"]] = \
-                    df[["PRESENTATION","TUBE","CONCENTRATION","LICKS","Latency"]].apply(pd.to_numeric)
+                df[["PRESENTATION","TUBE","LICKS","Latency"]] = \
+                    df[["PRESENTATION","TUBE","LICKS","Latency"]].apply(pd.to_numeric)
 				
 				#Add in identifier columns
                 df.insert(loc=0, column='Animal', value=Detail_Dict['Animal'])
