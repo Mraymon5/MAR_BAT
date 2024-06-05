@@ -7,9 +7,10 @@ The BAT_reader.py file has an option to call on an input file (sample file inclu
 
 The BAT_Plotting.py code is under construction, yet has basic features built in which read in the exported DataFrame csv file (created using BAT_reader.py) and allows users to plot various types of figures.
 
-#Setup:
-
-
+Setup:
+git clone https://github.com/bradlytstone/BAT.git #Clone the repository
+cd <path/to/BAT> #Move your working directory to the repository
+pip install -r requirements.txt #Install dependencies
 
 ---------------------------------MATLAB-------------------------------------
 The MATLAB codes create large datastructures for every session and store each subject who completed said session within respective structure. Each structure will contain the entire session's lick data, naming parameters, ILI data, and a few more "logic" vectors for ease of data handling.
